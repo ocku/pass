@@ -1,0 +1,222 @@
+#!/bin/sh
+
+# globals #####################################################################
+
+# encryption
+rsa_keygen_bits=4096
+# directories
+work_dir="$HOME/.local/share/pass"
+keys_dir="$work_dir/keys"
+data_dir="$work_dir/data"
+# limits
+max_pass_len=384
+min_pass_len=8
+# password :)
+_password=""
+
+# general #####################################################################
+
+normalize() {
+  stty echo
+  set +o noglob
+}
+
+die() {
+  # die {message}
+  # prints {message} to stderr and exits
+  printf "[!] %s\n" "$*" 1>&2
+  exit 1
+}
+
+is_int() {
+  printf %d "$1" >/dev/null 2>&1
+}
+
+help() {
+  # help {exit_code}
+  # prints a help message and exits with {exit_code}
+  progname="${0##*/}"
+  cat <<-EOF
+Pass - A tiny shell password manager
+Usage: 
+  $progname [ls|list]
+    list all entries in the vault
+
+  $progname [s|set] {name}
+    ask for a password and save it as {name}
+
+  $progname [g|get] {name}
+    get the password for {name} and print it to stdout
+
+  $progname [n|gen] {name} {length?}
+    generate a password with length {length, defaults to 16}, 
+      save it as {name} and print it to stdout
+
+  $progname [rm|remove] {name}
+    remove the entry for {name} in the vault
+
+  $progname [x|export] {outfile}
+    export vault to {outfile, defaults to vault.tar.gz}
+EOF
+
+  exit "$1"
+}
+
+# passwords ###################################################################
+
+gen_pass() {
+  # gen_pass {length}
+  # generates a password of length {length}
+  tr </dev/urandom -dc "A-Za-z0-9_+$?=/\@!%&#()-" | head -c "$1"
+}
+
+check_pass_len() {
+  # check_pass_len {len}
+  # verifies that length is <= max_pass_length and >= min_pass_length
+
+  is_int "$1" || die "$1 is not a number"
+
+  [ "$1" -lt "$min_pass_len" ] &&
+    die "too short! $len < $min_pass_len"
+
+  [ "$1" -gt "$max_pass_len" ] &&
+    die "too long! $len > $max_pass_len"
+}
+
+ask_pass() {
+  # ask_pass
+  # asks for a password and saves it to _password
+  IFS=
+  stty -echo
+  set -o noglob
+  printf "%s: " "$1"
+  read -r _password
+  stty echo
+  set +o noglob
+  printf "\n"
+}
+
+ask_pass_twice() {
+  # ask_pass_twice {message}
+  # asks for a password twice and saves it to _password
+  while :; do
+    ask_pass "$1"
+
+    [ -z "$_password" ] && continue
+
+    _first_password="$_password"
+
+    ask_pass "$1 (again)"
+
+    [ "$_first_password" = "$_password" ] && break
+
+    printf "%s\n" "passwords did not match, try again"
+  done
+
+  unset _first_password
+}
+
+# keys ########################################################################
+
+gen_private_key() {
+  printf "* generating private key\n"
+
+  [ -z "$_password" ] && ask_pass_twice "vault password"
+
+  openssl genpkey -algorithm RSA \
+    -pkeyopt "rsa_keygen_bits:${rsa_keygen_bits}" \
+    -pass "pass:$_password" -out "$keys_dir/priv.pem"
+}
+
+gen_public_key() {
+  printf "* generating public key\n"
+
+  [ -z "$_password" ] && ask_pass "vault password"
+
+  openssl pkey -in "$keys_dir/priv.pem" -pubout \
+    -out "$keys_dir/pub.pem" -passin "pass:$_password"
+}
+
+encrypt() {
+  # encrypt {data} {password}
+  # encrypt {data} with {password}
+  printf "%s" "$2" | openssl pkeyutl -encrypt -pubin -inkey \
+    "${keys_dir}/pub.pem" -out "$1"
+}
+
+decrypt() {
+  # decrypt {data} {password}
+  # decrypt {data} with {password}
+  [ -z "$_password" ] && ask_pass "vault password"
+
+  openssl pkeyutl -decrypt -inkey "$keys_dir/priv.pem" -in "$1" \
+    -passin "pass:$_password" 2>/dev/null ||
+    die "invalid vault password"
+}
+
+# main ########################################################################
+
+trap normalize 1 2 3 6
+
+[ -d "$work_dir" ] || mkdir -p "$work_dir"
+[ -d "$keys_dir" ] || mkdir -p "$keys_dir"
+[ -d "$data_dir" ] || mkdir -p "$data_dir"
+[ -e "$keys_dir/priv.pem" ] || gen_private_key
+[ -e "$keys_dir/pub.pem" ] || gen_public_key
+
+case "$1" in
+x | export)
+  tar -czvf "${2:-"vault.tar.gz"}" -C "$work_dir" .
+  ;;
+
+s | set)
+  [ -z "$2" ] && help 1
+
+  ask_pass_twice "password for $2"
+
+  check_pass_len "${#_password}"
+
+  encrypt "$data_dir/$2" "$_password"
+  ;;
+
+n | gen)
+  [ -z "$2" ] && help 1
+  [ -e "$data_dir/$2" ] && die "'$2' already exists"
+
+  len=${3:-16}
+
+  check_pass_len "${len}"
+
+  _password=$(gen_pass "$len")
+
+  encrypt "$data_dir/$2" "$_password"
+
+  printf "%s\n" "$_password"
+
+  unset len
+  ;;
+
+g | get)
+  [ -z "$2" ] && help 1
+  [ -e "$data_dir/$2" ] || die "'$2' not in vault"
+
+  decrypt "$data_dir/$2"
+
+  printf "\n"
+  ;;
+
+rm | remove)
+  [ -z "$2" ] && help 1
+  [ -e "$data_dir/$2" ] || die "'$2' not in vault"
+
+  rm "$data_dir/$2"
+  ;;
+
+ls | list)
+  ls "$data_dir"
+  ;;
+
+*)
+  help 0
+  ;;
+esac
