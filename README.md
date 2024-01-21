@@ -1,6 +1,6 @@
 # Pass
 
-A tiny password manager in shell using OpenSSL and RSA
+A tiny password manager in shell using OpenSSL's RSA implementation
 
 ## Limits
 
