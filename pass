@@ -2,14 +2,16 @@
 
 # globals #####################################################################
 
-# encryption
-rsa_keygen_bits=4096
 # directories
 work_dir="$HOME/.local/share/pass"
 keys_dir="$work_dir/keys"
 data_dir="$work_dir/data"
+# keys
+rsa_keygen_bits=4096
+pub_key="$keys_dir/pub.pem"
+priv_key="$keys_dir/priv.pem"
 # limits
-max_pass_len=384
+max_pass_len=$((rsa_keygen_bits / 8 - 11))
 min_pass_len=8
 # password :)
 _password=""
@@ -28,16 +30,12 @@ die() {
   exit 1
 }
 
-is_int() {
-  printf %d "$1" >/dev/null 2>&1
-}
-
 help() {
   # help {exit_code}
   # prints a help message and exits with {exit_code}
   progname="${0##*/}"
   cat <<-EOF
-Pass - A tiny shell password manager
+Pass
 Usage: 
   $progname [ls|list]
     list all entries in the vault
@@ -67,11 +65,17 @@ EOF
 gen_pass() {
   # gen_pass {length}
   # generates a password of length {length}
+
   tr </dev/urandom -dc "A-Za-z0-9_+$?=/\@!%&#()-" | head -c "$1"
 }
 
-check_pass_len() {
-  # check_pass_len {len}
+is_int() {
+  # credit to dylanaraps/pure-sh-bible
+  printf %d "$1" >/dev/null 2>&1
+}
+
+guard_pass_len() {
+  # guard_pass_len {len}
   # verifies that length is <= max_pass_length and >= min_pass_length
 
   is_int "$1" || die "$1 is not a number"
@@ -122,34 +126,31 @@ gen_private_key() {
   printf "* generating private key\n"
 
   [ -z "$_password" ] && ask_pass_twice "vault password"
-
   openssl genpkey -algorithm RSA \
     -pkeyopt "rsa_keygen_bits:${rsa_keygen_bits}" \
-    -pass "pass:$_password" -out "$keys_dir/priv.pem"
+    -pass "pass:$_password" -out "$priv_key"
 }
 
 gen_public_key() {
   printf "* generating public key\n"
 
   [ -z "$_password" ] && ask_pass "vault password"
-
-  openssl pkey -in "$keys_dir/priv.pem" -pubout \
-    -out "$keys_dir/pub.pem" -passin "pass:$_password"
+  openssl pkey -in "$priv_key" -pubout \
+    -out "$pub_key" -passin "pass:$_password"
 }
 
 encrypt() {
-  # encrypt {data} {password}
-  # encrypt {data} with {password}
+  # encrypt {outfile} {password}
+  # encrypt {password}, saving it to {outfile}
   printf "%s" "$2" | openssl pkeyutl -encrypt -pubin -inkey \
     "${keys_dir}/pub.pem" -out "$1"
 }
 
 decrypt() {
-  # decrypt {data} {password}
-  # decrypt {data} with {password}
-  [ -z "$_password" ] && ask_pass "vault password"
+  # decrypt {data}
 
-  openssl pkeyutl -decrypt -inkey "$keys_dir/priv.pem" -in "$1" \
+  [ -z "$_password" ] && ask_pass "vault password"
+  openssl pkeyutl -decrypt -inkey "$priv_key" -in "$1" \
     -passin "pass:$_password" 2>/dev/null ||
     die "invalid vault password"
 }
@@ -161,8 +162,8 @@ trap normalize 1 2 3 6
 [ -d "$work_dir" ] || mkdir -p "$work_dir"
 [ -d "$keys_dir" ] || mkdir -p "$keys_dir"
 [ -d "$data_dir" ] || mkdir -p "$data_dir"
-[ -e "$keys_dir/priv.pem" ] || gen_private_key
-[ -e "$keys_dir/pub.pem" ] || gen_public_key
+[ -e "$priv_key" ] || gen_private_key
+[ -e "$pub_key" ] || gen_public_key
 
 case "$1" in
 x | export)
@@ -174,7 +175,7 @@ s | set)
 
   ask_pass_twice "password for $2"
 
-  check_pass_len "${#_password}"
+  guard_pass_len "${#_password}"
 
   encrypt "$data_dir/$2" "$_password"
   ;;
@@ -183,9 +184,9 @@ n | gen)
   [ -z "$2" ] && help 1
   [ -e "$data_dir/$2" ] && die "'$2' already exists"
 
-  len=${3:-16}
+  len=${3:-24}
 
-  check_pass_len "${len}"
+  guard_pass_len "$len"
 
   _password=$(gen_pass "$len")
 

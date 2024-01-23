@@ -1,10 +1,10 @@
 # Pass
 
-A tiny password manager in shell using OpenSSL's RSA implementation
+A tiny password manager in shell using OpenSSL's RSA implementation.
 
 ## Limits
 
-Passwords must have a length between 8 and 384 characters when using 4096 bit keys (default)
+Passwords have a minimum length of 8 and a maximum of `key_size_bits / 8 - 11` bytes (501 with a 4096 bit key).
 
 ## Install
 
