@@ -47,7 +47,7 @@ Usage:
     get the password for {name} and print it to stdout
 
   $progname [n|gen] {name} {length?}
-    generate a password with length {length, defaults to 16}, 
+    generate a password with length {length, defaults to 24}, 
       save it as {name} and print it to stdout
 
   $progname [rm|remove] {name}

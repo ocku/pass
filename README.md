@@ -18,14 +18,16 @@ wget https://raw.githubusercontent.com/ocku/pass/main/pass -qO ~/.local/bin/pass
 File structures, limits, and key size can all be modified by directly editing the globals at the top of the script. These are the defaults:
 
 ```sh
-# encryption
-rsa_keygen_bits=4096
 # directories
 work_dir="$HOME/.local/share/pass"
 keys_dir="$work_dir/keys"
 data_dir="$work_dir/data"
+# keys
+rsa_keygen_bits=4096
+pub_key="$keys_dir/pub.pem"
+priv_key="$keys_dir/priv.pem"
 # limits
-max_pass_len=384
+max_pass_len=$((rsa_keygen_bits / 8 - 11))
 min_pass_len=8
 ```
 
@@ -42,7 +44,7 @@ min_pass_len=8
     get the password for {name} and print it to stdout
 
   pass [n|gen] {name} {length?}
-    generate a password with length {length, defaults to 16},
+    generate a password with length {length, defaults to 24},
       save it as {name} and print it to stdout
 
   pass [rm|remove] {name}
